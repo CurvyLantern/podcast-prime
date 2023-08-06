@@ -1,4 +1,15 @@
 const ChannelPage = () => {
+
+  const createDevice = () => {
+
+  }
+  const createSendTransport = () => {
+    // create device send transport
+  }
+  
+
+
+
   return (
     <div className=" bg-neutral-600 h-full flex items-center">
       {/* display */}

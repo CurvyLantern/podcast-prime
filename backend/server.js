@@ -62,13 +62,18 @@ const mediaCodecs = [
   },
 ];
 
+/**
+ * @type mediasoup.types.Router
+ *
+ */
+let mRouter;
 peers.on(socketEvents.onConnnection, async (socket) => {
   console.log(socket.id);
 
   socket.on(socketEvents.onDisconnect, () => {
     console.log("peer disconnected");
   });
-  const mRouter = await (
+  mRouter = await (
     await mWorkerPromise
   ).createRouter({
     mediaCodecs,
@@ -80,7 +85,79 @@ peers.on(socketEvents.onConnnection, async (socket) => {
     socketId: socket.id,
     routerRtpCapabilities: mRouter.rtpCapabilities ?? {},
   });
+
+  let producerTransport;
+  socket.on(socketEvents.createWebrtcTransport, async ({ sender }, cb) => {
+    console.log(`Is this a sender request ? ${sender}`);
+    if (sender) {
+      producerTransport = await createWebrtcTransport(cb);
+    } else {
+      const consumerTransport = await createWebrtcTransport(cb);
+    }
+  });
+
+  socket.on(
+    socketEvents.transportConnect,
+    async ({ transportId, dtlsParameters }, cb) => {
+      console.log("DTLS PARAMS");
+      await producerTransport.connect({ dtlsParameters });
+    }
+  );
+  let producer;
+  socket.on(
+    socketEvents.transportProduce,
+    async ({ kind, rtpParameters, appData }, cb) => {
+      producer = await producerTransport.produce({ kind, rtpParameters });
+
+      producer.on("transportCLose", () => {
+        console.log("transport for this producer closed");
+        producer.close();
+      });
+
+      cb({ id: producer.id });
+    }
+  );
 });
+
+async function createWebrtcTransport(cb) {
+  try {
+    const webRtcTransportOptions = {
+      listenIps: [
+        {
+          ip: "127.0.0.1",
+        },
+      ],
+      enableUdp: true,
+      enableTcp: true,
+      preferUdp: true,
+    };
+    const transport = await mRouter.createWebRtcTransport(
+      webRtcTransportOptions
+    );
+
+    console.log(`transport id : ${transport.id}`);
+
+    transport.on("dtlsstatechange", (dtlsState) => {
+      if (dtlsState === "closed") {
+        transport.close();
+      }
+    });
+    transport.on("@close", () => {
+      console.log("transport closed");
+    });
+
+    cb({
+      params: {
+        id: transport.id,
+        icePrams: transport.iceParameters,
+        iceCandidates: transport.iceCandidates,
+        dtlsParams: transport.dtlsParameters,
+      },
+    });
+
+    return transport;
+  } catch (error) {}
+}
 
 async function createMworker() {
   const worker = await mediasoup.createWorker({

@@ -8,44 +8,138 @@ import { useState } from "react";
 const api = "https://localhost:8000";
 const socketClient = io(`${api}/mediasoup`);
 
-const device = new msc.Device();
-
-console.log({ device });
+const trackParams = {
+  encoding: [
+    {
+      rid: "r0",
+      maxBitrate: 100000,
+      scalabilityMode: "S1T3",
+    },
+    {
+      rid: "r1",
+      maxBitrate: 300000,
+      scalabilityMode: "S1T3",
+    },
+    {
+      rid: "r2",
+      maxBitrate: 900000,
+      scalabilityMode: "S1T3",
+    },
+  ],
+  codecOptions: {
+    videoGoogleStartBitrate: 1000,
+  },
+};
 
 const HomePage = () => {
   const [routerRtpCapabilities, setRouterRtpCapabilities] = useState({});
+  const [device, setDevice] = useState(null);
+  const [producerTp, setProducerTp] = useState(null);
   const myVideoEl = useRef(null);
+  const [stream, setStream] = useState(null);
+
+  // get local video
   const getLocalVideo = async () => {
-    const vTrack = await navigator.mediaDevices.getDisplayMedia({
+    const _stream = await navigator.mediaDevices.getDisplayMedia({
       audio: false,
       video: true,
     });
+    setStream(_stream);
 
-    if (vTrack) {
-      myVideoEl.current.srcObject = vTrack;
+    if (_stream) {
+      myVideoEl.current.srcObject = _stream;
     } else {
       console.error("no video track was found");
     }
   };
+
   const getRtpCapabilities = () => {
-    socketClient.emit();
+    console.log({ routerRtpCapabilities });
   };
 
+  // create a device with rtp capabilities
   const createDevice = async () => {
+    if (device) return;
     try {
-      const device = new msc.Device();
-      await device.load({
+      const _device = new msc.Device();
+      await _device.load({
         routerRtpCapabilities,
       });
+      setDevice(_device);
 
-      console.log({ routerRtpCapabilities });
+      console.log({ _device, device });
     } catch (error) {
       console.log(error.message);
     }
   };
 
+  // create a send transport
   const createSendTransport = () => {
+    socketClient.emit(
+      socketEvents.createWebrtcTransport,
+      { sender: true },
+      ({ params }) => {
+        if (params.error) {
+          console.log(params.error);
+          return;
+        }
+        console.log(`params received from send transport `, params);
+
+        const _producerTp = device.createSendTransport(params);
+        setProducerTp(_producerTp);
+        _producerTp.on("connect", async ({ dtlsParameters }, cb, errCb) => {
+          try {
+            socketClient.emit(socketEvents.transportConnect, {
+              transportId: _producerTp.id,
+              dtlsParameters,
+            });
+
+            cb();
+          } catch (error) {
+            errCb(error);
+          }
+        });
+
+        _producerTp.on("produce", async (params, cb, errCb) => {
+          console.log(`params from producer tp produce event`, params);
+
+          try {
+            await socketClient.emit(
+              socketEvents.transportProduce,
+              {
+                transportId: _producerTp.id,
+                kind: params.kind,
+                rtpParams: params.rtpPaarameters,
+                appData: params.appData,
+              },
+              ({ id }) => {
+                cb({ id });
+              }
+            );
+          } catch (err) {
+            errCb(err);
+          }
+        });
+      }
+    );
     return null;
+  };
+
+  const connectSendTransport = async () => {
+    const producer = await producerTp.produce({
+      track: stream.getVideoTracks()[0],
+      ...trackParams,
+    });
+    producer.on("trackended", () => {
+      console.log("track-ended");
+      //close video
+    });
+
+    producer.on("transportclose", () => {
+      console.log("transport for this producer closed");
+
+      producer.close();
+    });
   };
 
   const createConsumer = () => {
@@ -75,7 +169,7 @@ const HomePage = () => {
     {
       label: "connect send transport & produce",
 
-      cb: createConsumer,
+      cb: connectSendTransport,
     },
     {
       label: "create recv transport",
@@ -112,7 +206,8 @@ const HomePage = () => {
             ref={myVideoEl}
             autoPlay
             playsInline
-            muted></video>
+            muted
+          ></video>
         </div>
         <div className="w-96 h-64 shadow-md rounded-md bg-neutral-800"></div>
       </div>
@@ -121,14 +216,13 @@ const HomePage = () => {
       <div className="mt-10 flex flex-col p-5 bg-red-400 gap-2">
         {workProcess.map((prc, prcIndex) => {
           return (
-            <div
-              key={prcIndex}
-              className="">
+            <div key={prcIndex} className="">
               <button
                 onClick={() => {
                   prc.cb();
                 }}
-                className="px-5 py-3 bg-white ">
+                className="px-5 py-3 bg-white "
+              >
                 {prcIndex + 1 + " " + prc.label}
               </button>
             </div>
