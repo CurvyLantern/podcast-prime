@@ -1,0 +1,39 @@
+# Logs
+logs
+*.log
+
+# Dependency directories
+node_modules/
+bower_components/
+
+# Environment files
+# Ignore all .env files
+.env
+.env.*
+.env.local
+.env.development
+.env.test
+.env.production
+
+# Except for .env.example
+!/.env.example
+
+# Build output
+build/
+dist/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Editor/IDE specific files
+.vscode/
+.idea/
+
+# Testing and coverage
+coverage/
+
+# npm package lock
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
